@@ -26,6 +26,7 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
 )
 
+from homeassistant.helpers.service import async_call_from_config
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -45,6 +46,9 @@ DEFAULT_DEVICE_CLASS = 'shutter'
 CONF_OPEN_SCRIPT_ENTITY_ID = 'open_script_entity_id'
 CONF_CLOSE_SCRIPT_ENTITY_ID = 'close_script_entity_id'
 CONF_STOP_SCRIPT_ENTITY_ID = 'stop_script_entity_id'
+CONF_OPEN_COMMAND = 'open_command'
+CONF_CLOSE_COMMAND = 'close_command'
+CONF_STOP_COMMAND = 'stop_command'
 CONF_COVER_ENTITY_ID = 'cover_entity_id'
 CONF_AVAILABILITY_TPL = 'availability_template'
 ATTR_CONFIDENT = 'confident'
@@ -69,12 +73,29 @@ BASE_DEVICE_SCHEMA = vol.Schema(
     }
 )
 
-SCRIPT_DEVICE_SCHEMA = BASE_DEVICE_SCHEMA.extend(
-    {
-        vol.Required(CONF_OPEN_SCRIPT_ENTITY_ID): cv.entity_id,
-        vol.Required(CONF_CLOSE_SCRIPT_ENTITY_ID): cv.entity_id,
-        vol.Required(CONF_STOP_SCRIPT_ENTITY_ID): cv.entity_id,
-    }
+SCRIPT_DEVICE_SCHEMA = vol.Schema(
+    vol.All(
+        BASE_DEVICE_SCHEMA.extend(
+            {
+                vol.Exclusive(CONF_OPEN_SCRIPT_ENTITY_ID, 'open script entity or command'): cv.entity_id,
+                vol.Exclusive(CONF_OPEN_COMMAND, 'open script entity or command'): vol.Any(cv.SERVICE_SCHEMA, cv.entity_id),
+
+                vol.Exclusive(CONF_CLOSE_SCRIPT_ENTITY_ID, 'close script entity or command'): cv.entity_id,
+                vol.Exclusive(CONF_CLOSE_COMMAND, 'close script entity or command'): vol.Any(cv.SERVICE_SCHEMA, cv.entity_id),
+
+                vol.Exclusive(CONF_STOP_SCRIPT_ENTITY_ID, 'stop script entity or command'): cv.entity_id,
+                vol.Exclusive(CONF_STOP_COMMAND, 'stop script entity or command'): vol.Any(cv.SERVICE_SCHEMA, cv.entity_id)
+            }
+        ),
+        cv.has_at_least_one_key(CONF_OPEN_SCRIPT_ENTITY_ID, CONF_OPEN_COMMAND),
+        cv.has_at_least_one_key(CONF_CLOSE_SCRIPT_ENTITY_ID, CONF_CLOSE_COMMAND),
+        cv.has_at_least_one_key(CONF_STOP_SCRIPT_ENTITY_ID, CONF_STOP_COMMAND),
+
+        cv.deprecated(CONF_OPEN_SCRIPT_ENTITY_ID,replacement_key=CONF_OPEN_COMMAND),
+        cv.deprecated(CONF_CLOSE_SCRIPT_ENTITY_ID,replacement_key=CONF_CLOSE_COMMAND),
+        cv.deprecated(CONF_STOP_SCRIPT_ENTITY_ID,replacement_key=CONF_STOP_COMMAND),
+
+    )
 )
 
 COVER_DEVICE_SCHEMA = BASE_DEVICE_SCHEMA.extend(
@@ -124,6 +145,9 @@ def devices_from_config(domain_config):
         open_script_entity_id = config.pop(CONF_OPEN_SCRIPT_ENTITY_ID, None)
         close_script_entity_id = config.pop(CONF_CLOSE_SCRIPT_ENTITY_ID, None)
         stop_script_entity_id = config.pop(CONF_STOP_SCRIPT_ENTITY_ID, None)
+        open_command = config.pop(CONF_OPEN_COMMAND, None)
+        close_command = config.pop(CONF_CLOSE_COMMAND, None)
+        stop_command = config.pop(CONF_STOP_COMMAND, None)
         cover_entity_id = config.pop(CONF_COVER_ENTITY_ID, None)
         send_stop_at_ends = config.pop(CONF_SEND_STOP_AT_ENDS)
         always_confident = config.pop(CONF_ALWAYS_CONFIDENT)
@@ -136,6 +160,9 @@ def devices_from_config(domain_config):
                                 open_script_entity_id, 
                                 close_script_entity_id, 
                                 stop_script_entity_id, 
+                                open_command,
+                                close_command,
+                                stop_command,
                                 cover_entity_id, 
                                 send_stop_at_ends, 
                                 always_confident, 
@@ -169,6 +196,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                  open_script_entity_id, 
                  close_script_entity_id, 
                  stop_script_entity_id, 
+                 open_command,
+                 close_command,
+                 stop_command,
                  cover_entity_id, 
                  send_stop_at_ends, 
                  always_confident, 
@@ -181,6 +211,9 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
         self._open_script_entity_id = open_script_entity_id
         self._close_script_entity_id = close_script_entity_id 
         self._stop_script_entity_id = stop_script_entity_id
+        self._open_command = open_command
+        self._close_command = close_command
+        self._stop_command = stop_command
         self._cover_entity_id = cover_entity_id
         self._send_stop_at_ends = send_stop_at_ends
         self._always_confident = always_confident
@@ -426,6 +459,13 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                     _LOGGER.debug(self._name + ': ' + 'auto_stop_if_necessary :: send_stop_at_ends :: calling stop command')
                     await self._async_handle_command(SERVICE_STOP_COVER)
 
+    async def _async_call_command(self, cmd):
+        """Different call methods if command is entity or service, for backward compatibility"""
+        if isinstance(cmd, dict):
+            await async_call_from_config(hass=self.hass, config=cmd, blocking=False, validate_config=True)
+        else:
+            await self.hass.services.async_call("homeassistant", "turn_on", {"entity_id": cmd}, False)
+
     async def _async_handle_command(self, command, *args):
         """We have cover.* triggered command. Reset assumed state and known_position processsing and execute"""
         self._assume_uncertain_position = not self._always_confident
@@ -436,24 +476,31 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
             self._state = False
             if self._cover_entity_id is not None:
                 await self.hass.services.async_call("cover", "close_cover", {"entity_id": self._cover_entity_id}, False)
+            elif self._close_command is not None:
+                await self._async_call_command(self._close_command)
             else:
-                await self.hass.services.async_call("homeassistant", "turn_on", {"entity_id": self._close_script_entity_id}, False)
+                await self._async_call_command(self._close_script_entity_id)
 
         elif command == "open_cover":
             cmd = "UP"
             self._state = True
             if self._cover_entity_id is not None:
                 await self.hass.services.async_call("cover", "open_cover", {"entity_id": self._cover_entity_id}, False)
+            elif self._open_command is not None:
+                await self._async_call_command(self._open_command)
             else:
-                await self.hass.services.async_call("homeassistant", "turn_on", {"entity_id": self._open_script_entity_id}, False)
+                await self._async_call_command(self._open_script_entity_id)
 
         elif command == "stop_cover":
             cmd = "STOP"
             self._state = True
             if self._cover_entity_id is not None:
                 await self.hass.services.async_call("cover", "stop_cover", {"entity_id": self._cover_entity_id}, False)
+            elif self._stop_command is not None:
+                await self._async_call_command(self._stop_command)
             else:
-                await self.hass.services.async_call("homeassistant", "turn_on", {"entity_id": self._stop_script_entity_id}, False)
+                await self._async_call_command(self._stop_script_entity_id)
+            
 
         _LOGGER.debug(self._name + ': ' + '_async_handle_command :: %s', cmd)
 

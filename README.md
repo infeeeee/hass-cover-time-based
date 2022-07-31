@@ -36,16 +36,40 @@ cover:
         name: My Room Cover
         travelling_time_up: 36
         travelling_time_down: 34
-        close_script_entity_id: script.rf_myroom_cover_down
-        stop_script_entity_id: script.rf_myroom_cover_stop
-        open_script_entity_id: script.rf_myroom_cover_up
+        close_command: script.rf_myroom_cover_down
+        stop_command: script.rf_myroom_cover_stop
+        open_command: script.rf_myroom_cover_up
         send_stop_at_ends: False #optional
         always_confident: False #optional
         device_class: garage #optional
         availability_template: "{{ is_state('binary_sensor.rf_bridge_status', 'on') }}" #optional
 ```
+
+You can use scripts with variables this way:
+
+```yaml
+cover:
+  - platform: cover_rf_time_based
+    devices:
+      my_room_cover_time_based:
+        name: My Room Cover
+        travelling_time_up: 36
+        travelling_time_down: 34
+        close_command: 
+          service: script.rf_myroom_cover
+          data:
+            command: "close"
+        stop_command:
+          service: script.rf_myroom_cover
+          data:
+            command: "stop"
+        open_command: 
+          service: script.rf_myroom_cover
+          data:
+            command: "open"
+```
   
-**OR**:  
+**OR** you can drive another cover entity:  
   
 ```yaml
 cover:
