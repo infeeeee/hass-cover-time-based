@@ -30,6 +30,9 @@ from homeassistant.helpers.service import async_call_from_config
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.restore_state import RestoreEntity
 
+from .travelcalculator import TravelCalculator
+from .travelcalculator import TravelStatus
+
 _LOGGER = logging.getLogger(__name__)
 
 CONF_DEVICES = 'devices'
@@ -205,7 +208,6 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
                  device_class,
                  availability_template):
         """Initialize the cover."""
-        from xknx.devices import TravelCalculator
         self._travel_time_down = travel_time_down
         self._travel_time_up = travel_time_up
         self._open_script_entity_id = open_script_entity_id
@@ -302,14 +304,12 @@ class CoverTimeBased(CoverEntity, RestoreEntity):
     @property
     def is_opening(self):
         """Return if the cover is opening or not."""
-        from xknx.devices import TravelStatus
         return self.tc.is_traveling() and \
                self.tc.travel_direction == TravelStatus.DIRECTION_UP
 
     @property
     def is_closing(self):
         """Return if the cover is closing or not."""
-        from xknx.devices import TravelStatus
         return self.tc.is_traveling() and \
                self.tc.travel_direction == TravelStatus.DIRECTION_DOWN
 
